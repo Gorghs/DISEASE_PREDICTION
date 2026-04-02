@@ -79,7 +79,17 @@ async function uploadImage(file) {
             body: formData
         });
 
-        const data = await response.json();
+        const contentType = response.headers.get('content-type') || '';
+        let data = null;
+
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            const responseText = await response.text();
+            data = {
+                error: responseText || `Request failed with status ${response.status}`
+            };
+        }
 
         // Hide loading spinner
         loadingSpinner.classList.add('hidden');
@@ -88,7 +98,11 @@ async function uploadImage(file) {
         if (response.ok) {
             displaySuccessResult(data);
         } else {
-            displayRejectedResult(data);
+            if (data.reason || data.message) {
+                displayRejectedResult(data);
+            } else {
+                displayErrorResult(data.error || `Request failed with status ${response.status}`);
+            }
         }
     } catch (error) {
         loadingSpinner.classList.add('hidden');

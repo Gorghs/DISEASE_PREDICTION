@@ -119,6 +119,13 @@ def ensure_model_loaded():
         print(f"❌ Error loading model: {e}")
         return str(e)
 
+
+# Load the model as the worker starts so the first prediction request does not
+# spend the entire request budget doing TensorFlow initialization.
+_startup_load_error = ensure_model_loaded()
+if _startup_load_error:
+    print(f"⚠️ Startup model load failed: {_startup_load_error}")
+
 # ── API Routes ───────────────────────────────────────────────
 
 @app.route('/', methods=['GET'])
