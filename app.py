@@ -11,9 +11,6 @@ import threading
 import numpy as np
 import colorsys
 from flask import Flask, request, jsonify, render_template
-import tensorflow as tf
-from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.applications.resnet import preprocess_input
 from PIL import Image
 
 # ── Initialize Flask App ─────────────────────────────────────
@@ -26,9 +23,14 @@ IMG_SIZE = 224
 CONFIDENCE_THRESHOLD = 0.70
 GREEN_RATIO_THRESHOLD = 0.10
 MODEL_LOAD_LOCK = threading.Lock()
+MODEL_WARMUP_STARTED = False
+MODEL_LOAD_ERROR = None
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "banana_disease_model.h5")
 METADATA_PATH = os.path.join(BASE_DIR, "models", "class_metadata.json")
+TF = None
+IMG_TO_ARRAY = None
+PREPROCESS_INPUT = None
 
 DISEASE_INFO = {
     "healthy": {
@@ -103,9 +105,29 @@ def is_confident_enough(preds, threshold=CONFIDENCE_THRESHOLD):
     return conf_ok, top_conf
 
 # ── Model Loading ────────────────────────────────────────────
+def ensure_tf_loaded():
+    """Import TensorFlow lazily to keep app startup lightweight."""
+    global TF, IMG_TO_ARRAY, PREPROCESS_INPUT
+
+    if TF is not None:
+        return None
+
+    try:
+        import tensorflow as tf
+        from tensorflow.keras.preprocessing.image import img_to_array
+        from tensorflow.keras.applications.resnet import preprocess_input
+
+        TF = tf
+        IMG_TO_ARRAY = img_to_array
+        PREPROCESS_INPUT = preprocess_input
+        return None
+    except Exception as e:
+        return str(e)
+
+
 def ensure_model_loaded():
-    """Load model into memory once when an API endpoint needs it."""
-    global MODEL, CLASS_NAMES
+    """Load model into memory once; returns error text on failure."""
+    global MODEL, CLASS_NAMES, MODEL_LOAD_ERROR
 
     if MODEL is not None and CLASS_NAMES is not None:
         return None
@@ -116,29 +138,55 @@ def ensure_model_loaded():
 
         print("\n🔄 Loading model into memory...")
         try:
-            MODEL = tf.keras.models.load_model(MODEL_PATH)
+            tf_error = ensure_tf_loaded()
+            if tf_error:
+                MODEL_LOAD_ERROR = tf_error
+                return MODEL_LOAD_ERROR
+
+            MODEL = TF.keras.models.load_model(MODEL_PATH, compile=False)
             print("✅ Model loaded successfully into memory")
 
             with open(METADATA_PATH, 'r') as f:
                 metadata = json.load(f)
                 CLASS_NAMES = metadata["class_names"]
             print(f"✅ Classes loaded: {CLASS_NAMES}")
+            MODEL_LOAD_ERROR = None
             return None
         except Exception as e:
             print(f"❌ Error loading model: {e}")
-            return str(e)
+            MODEL_LOAD_ERROR = str(e)
+            return MODEL_LOAD_ERROR
+
+
+def trigger_model_warmup():
+    """Start background model warmup once so requests do not time out."""
+    global MODEL_WARMUP_STARTED
+
+    if MODEL is not None and CLASS_NAMES is not None:
+        return
+
+    with MODEL_LOAD_LOCK:
+        if MODEL_WARMUP_STARTED:
+            return
+        MODEL_WARMUP_STARTED = True
+
+    threading.Thread(target=ensure_model_loaded, daemon=True).start()
 
 # ── API Routes ───────────────────────────────────────────────
 
 @app.route('/', methods=['GET'])
 def home():
     """Serve the web interface"""
+    trigger_model_warmup()
     return render_template('index.html')
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
     if MODEL is None or CLASS_NAMES is None:
+        trigger_model_warmup()
+        if MODEL_LOAD_ERROR:
+            return jsonify({"status": "error", "error": MODEL_LOAD_ERROR}), 500
         return jsonify({"status": "loading model"}), 202
     return jsonify({
         "status": "healthy",
@@ -150,9 +198,11 @@ def health():
 @app.route('/info', methods=['GET'])
 def info():
     """Get model and disease information"""
-    load_error = ensure_model_loaded()
-    if load_error:
-        return jsonify({"error": f"Model loading failed: {load_error}"}), 500
+    if MODEL is None or CLASS_NAMES is None:
+        trigger_model_warmup()
+        if MODEL_LOAD_ERROR:
+            return jsonify({"error": f"Model loading failed: {MODEL_LOAD_ERROR}"}), 500
+        return jsonify({"status": "loading", "message": "Model is warming up. Try again shortly."}), 202
 
     return jsonify({
         "model_name": "ResNet50 Banana Leaf Disease Classifier",
@@ -181,9 +231,11 @@ def predict():
     Returns: JSON with prediction, confidence, and treatment info
     """
     
-    load_error = ensure_model_loaded()
-    if load_error:
-        return jsonify({"error": f"Model loading failed: {load_error}"}), 500
+    if MODEL is None or CLASS_NAMES is None:
+        trigger_model_warmup()
+        if MODEL_LOAD_ERROR:
+            return jsonify({"error": f"Model loading failed: {MODEL_LOAD_ERROR}"}), 500
+        return jsonify({"status": "loading", "message": "Model is warming up. Please retry in about 30-60 seconds."}), 503
     
     # Check if image is in request
     if 'image' not in request.files:
@@ -212,9 +264,9 @@ def predict():
         
         # ── Step 2: Prepare image for model ──────────────────
         img_resized = img.resize((IMG_SIZE, IMG_SIZE))
-        img_array = img_to_array(img_resized)
+        img_array = IMG_TO_ARRAY(img_resized)
         img_array = np.expand_dims(img_array, axis=0)
-        img_array = preprocess_input(img_array)
+        img_array = PREPROCESS_INPUT(img_array)
         
         # ── Step 3: Make prediction ──────────────────────────
         preds = MODEL.predict(img_array, verbose=0)[0]

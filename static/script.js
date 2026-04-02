@@ -98,10 +98,10 @@ async function uploadImage(file) {
         if (response.ok) {
             displaySuccessResult(data);
         } else {
-            if (data.reason || data.message) {
+            if (data.reason) {
                 displayRejectedResult(data);
             } else {
-                displayErrorResult(data.error || `Request failed with status ${response.status}`);
+                displayErrorResult(data.message || data.error || `Request failed with status ${response.status}`);
             }
         }
     } catch (error) {
