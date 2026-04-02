@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍌 Banana Leaf Disease Classifier</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🍌 Banana Leaf Disease Classifier</h1>
+                <p class="subtitle">AI-powered disease detection and treatment recommendations</p>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Upload Section -->
+            <section class="upload-section">
+                <div class="upload-box">
+                    <div class="upload-area" id="uploadArea">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <h2>Upload Banana Leaf Image</h2>
+                        <p>Drag and drop or click to select</p>
+                        <input type="file" id="imageInput" accept="image/*" hidden>
+                    </div>
+                </div>
+
+                <!-- Image Preview -->
+                <div id="previewContainer" class="preview-container hidden">
+                    <div class="preview-wrapper">
+                        <img id="previewImage" src="" alt="Preview" class="preview-image">
+                        <button id="changeImageBtn" class="btn-change">Choose Different Image</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Loading Spinner -->
+            <div id="loadingSpinner" class="loading-spinner hidden">
+                <div class="spinner"></div>
+                <p>Analyzing image... Please wait</p>
+            </div>
+
+            <!-- Results Section -->
+            <section id="resultsSection" class="results-section hidden">
+                <!-- Success Result -->
+                <div id="successResult" class="result-card hidden">
+                    <div class="result-header success">
+                        <span id="diseaseEmoji" class="emoji">✅</span>
+                        <div>
+                            <h2 id="diseaseTitle">Disease Title</h2>
+                            <p id="confidenceText">Confidence: 92%</p>
+                        </div>
+                    </div>
+
+                    <div class="result-body">
+                        <div class="description-box">
+                            <h3>Description</h3>
+                            <p id="diseaseDescription">Disease description will appear here</p>
+                        </div>
+
+                        <div class="probabilities-box">
+                            <h3>Prediction Confidence</h3>
+                            <div id="probabilitiesChart" class="probabilities-chart"></div>
+                        </div>
+
+                        <div class="solutions-box">
+                            <h3>Recommended Solutions</h3>
+                            <ol id="solutionsList" class="solutions-list"></ol>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rejected Result -->
+                <div id="rejectedResult" class="result-card hidden">
+                    <div class="result-header rejected">
+                        <span class="emoji">⚠️</span>
+                        <div>
+                            <h2 id="rejectionTitle">Cannot Classify</h2>
+                            <p id="rejectionMessage">Please upload a valid banana leaf image</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Result -->
+                <div id="errorResult" class="result-card hidden">
+                    <div class="result-header error">
+                        <span class="emoji">❌</span>
+                        <div>
+                            <h2>Error Processing Image</h2>
+                            <p id="errorMessage">An error occurred. Please try again.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Try Again Button -->
+                <button id="tryAgainBtn" class="btn-primary full-width">Try Another Image</button>
+            </section>
+
+            <!-- Info Section -->
+            <section class="info-section">
+                <div class="info-card">
+                    <h3>🎯 How It Works</h3>
+                    <ol>
+                        <li>Upload a clear photo of a banana leaf</li>
+                        <li>AI analyzes the image for disease signs</li>
+                        <li>Receive instant diagnosis and treatment tips</li>
+                        <li>Follow recommendations to save your crop</li>
+                    </ol>
+                </div>
+
+                <div class="info-card">
+                    <h3>🍌 Diseases Detected</h3>
+                    <ul>
+                        <li>✅ <strong>Healthy</strong> - No disease</li>
+                        <li>🟡 <strong>Cordana</strong> - Fungal leaf spot</li>
+                        <li>🟠 <strong>Pestalotiopsis</strong> - Dark lesions</li>
+                        <li>🔴 <strong>Sigatoka</strong> - Severe fungal disease</li>
+                    </ul>
+                </div>
+
+                <div class="info-card">
+                    <h3>📸 Tips for Best Results</h3>
+                    <ul>
+                        <li>Use clear, well-lit photos</li>
+                        <li>Focus on affected leaf areas</li>
+                        <li>Avoid blurry or too distant shots</li>
+                        <li>Ensure leaf fills most of the frame</li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2026 Banana Leaf Disease Classifier | Powered by TensorFlow & Flask</p>
+            <p>AI Model for Sustainable Agriculture</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
