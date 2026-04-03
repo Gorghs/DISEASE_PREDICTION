@@ -31,6 +31,8 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "banana_model.h5")
 METADATA_PATH = os.path.join(BASE_DIR, "models", "metadata.json")
 TF = None
 KERAS_LOAD_MODEL = None
+KERAS_GET_CUSTOM_OBJECTS = None
+TF_GET_CUSTOM_OBJECTS = None
 IMG_TO_ARRAY = None
 PREPROCESS_INPUT = None
 
@@ -181,7 +183,7 @@ def call_backup_service(image_data, primary_prediction=None, primary_confidence=
 # ── Model Loading ────────────────────────────────────────────
 def ensure_tf_loaded():
     """Import TensorFlow lazily to keep app startup lightweight."""
-    global TF, KERAS_LOAD_MODEL, IMG_TO_ARRAY, PREPROCESS_INPUT
+    global TF, KERAS_LOAD_MODEL, KERAS_GET_CUSTOM_OBJECTS, TF_GET_CUSTOM_OBJECTS, IMG_TO_ARRAY, PREPROCESS_INPUT
 
     if TF is not None:
         return None
@@ -190,11 +192,15 @@ def ensure_tf_loaded():
         import tensorflow as tf
         import keras
         from keras.saving import load_model as keras_load_model
+        from keras.saving import get_custom_objects as keras_get_custom_objects
+        from tensorflow.keras.utils import get_custom_objects as tf_get_custom_objects
         from tensorflow.keras.preprocessing.image import img_to_array
         from tensorflow.keras.applications.resnet import preprocess_input
 
         TF = tf
         KERAS_LOAD_MODEL = keras_load_model
+        KERAS_GET_CUSTOM_OBJECTS = keras_get_custom_objects
+        TF_GET_CUSTOM_OBJECTS = tf_get_custom_objects
         IMG_TO_ARRAY = img_to_array
         PREPROCESS_INPUT = preprocess_input
         return None
@@ -235,8 +241,18 @@ def ensure_model_loaded():
 
             custom_objects = {
                 "Dense": DensePatched,
+                "keras.layers.Dense": DensePatched,
+                "keras.layers.core.Dense": DensePatched,
                 "InputLayer": InputLayerPatched,
+                "keras.layers.InputLayer": InputLayerPatched,
+                "keras.engine.input_layer.InputLayer": InputLayerPatched,
             }
+
+            # Register in global custom object maps to ensure deserialization uses patched classes
+            if KERAS_GET_CUSTOM_OBJECTS is not None:
+                KERAS_GET_CUSTOM_OBJECTS().update(custom_objects)
+            if TF_GET_CUSTOM_OBJECTS is not None:
+                TF_GET_CUSTOM_OBJECTS().update(custom_objects)
 
             try:
                 MODEL = KERAS_LOAD_MODEL(
