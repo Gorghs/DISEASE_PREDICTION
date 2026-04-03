@@ -12,10 +12,11 @@ import numpy as np
 import colorsys
 import base64
 from flask import Flask, request, jsonify, render_template
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 # ── Initialize Flask App ─────────────────────────────────────
 app = Flask(__name__, template_folder='templates', static_folder='static', static_url_path='/static')
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload limit
 
 # ── Global Variables (Model in Memory) ───────────────────────
 MODEL = None
@@ -376,6 +377,9 @@ def predict():
     if 'image' not in request.files:
         return jsonify({"error": "No image file provided"}), 400
     
+    if request.content_length is not None and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
+        return jsonify({"error": "Image is too large. Please upload a file under 10 MB."}), 413
+
     file = request.files['image']
     
     if file.filename == '':
@@ -494,6 +498,16 @@ def predict():
         
         return jsonify(response_data), 200
         
+    except UnidentifiedImageError:
+        return jsonify({
+            "error": "Invalid image file. Please upload a JPG or PNG banana leaf image.",
+            "status": "error"
+        }), 400
+    except OSError:
+        return jsonify({
+            "error": "Unable to read image data. Please try another file.",
+            "status": "error"
+        }), 400
     except Exception as e:
         return jsonify({
             "error": str(e),
