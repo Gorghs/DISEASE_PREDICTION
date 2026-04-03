@@ -8,5 +8,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: KAGGLE_API_TOKEN
-        scope: build
+      - key: BACKUP_SVC
+        scope: env

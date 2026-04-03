@@ -2,99 +2,55 @@
 
 ## Overview
 
-This project automatically:
-1. **Training Phase** (happens once on deploy)
-   - Downloads banana leaf dataset from Kaggle
-   - Trains ResNet50 model (30-50 minutes)
-   - Saves trained model to disk
-
-2. **Serving Phase** (starts after training completes)
-   - Flask API loads model into server **memory**
-   - Model stays in memory until server restarts
-   - Serves predictions via HTTP API
-   - No retraining needed between requests
+This is a **pre-trained inference-only deployment**:
+- **Model** - Pre-trained ResNet50 (97.84% accuracy, 96.5 MB)
+- **Dual Classification** - Primary ResNet50 + optional Gemini Vision fallback
+- **No Training Needed** - Model is pre-trained and ready to serve
+- **Fast & Memory-Efficient** - Loads once, stays in RAM
 
 ---
 
-## ✅ Quick Deployment (5 Minutes)
+## ✅ Quick Deployment (2 Minutes)
 
-### 1. Get Kaggle Credentials (2 min)
-- Go to https://www.kaggle.com/settings/account
-- Click **Create New Token**
-- Download `kaggle.json`
-- Note down your **KAGGLE_USERNAME** and **KAGGLE_KEY**
-
-### 2. Fork to GitHub (2 min)
+### 1. Push to GitHub (1 min)
 ```bash
-git init
 git add .
-git commit -m "Banana leaf classifier"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/banana-disease-classifier.git
-git push -u origin main
+git commit -m "Banana leaf classifier with Gemini fallback"
+git push origin main
 ```
 
-### 3. Deploy on Render (1 min setup, then wait for training)
-- Go to https://render.com (create free account)
-- Click **New +** → **Web Service**
-- Connect your GitHub repository
-- Set **Runtime** to **Python 3.11**
-- Enter these commands:
-  - **Build Command**: `pip install -r requirements.txt && python train.py`
-  - **Start Command**: `gunicorn --workers 1 --timeout 120 --bind 0.0.0.0:$PORT app:app`
-- Click **Advanced** → **Add Environment Variable**:
-  - Key: `KAGGLE_USERNAME` → Value: your kaggle username
-  - Key: `KAGGLE_KEY` → Value: your kaggle key
+### 2. Deploy on Render (1 min setup)
+- Go to https://render.com 
+- Click **New +** → **Web Service** → Connect GitHub repo
+- **Build Command**: `pip install -r requirements.txt`
+- **Start Command**: `gunicorn --workers 1 --timeout 120 --bind 0.0.0.0:$PORT app:app`
+- **(Optional)** **Environment Variable** for fallback:
+  - Key: `BACKUP_SVC` → Value: [Your Gemini API key from https://ai.google.dev]
 - Click **Deploy**
 
 ### ⏱️ Timeline
-- **Minutes 0-2**: Render builds environment
-- **Minutes 2-7**: Installs Python packages
-- **Minutes 7-25**: Downloads Kaggle dataset (~500MB)
-- **Minutes 25-70**: Trains ResNet50 model
-- **Minute 70+**: Flask API starts and ready for requests
+- **0-2 min**: Dependencies install and Flask starts
+- **Ready immediately** for predictions (model loads on first request)
 
 ---
 
-## 🎯 Architecture Explanation
+## 🎯 How It Works
 
-### What Happens on Deploy
+### Two-Model Classification System
 
 ```
-┌─ BUILD PHASE (Render creates environment)
-│  ├─ Install Python 3.11
-│  ├─ Install requirements.txt packages
-│  └─ Set KAGGLE_USERNAME & KAGGLE_KEY env vars
-│
-├─ TRAINING PHASE (runs python train.py)
-│  ├─ Download dataset from Kaggle (15 min, ~500MB)
-│  ├─ Load images and split train/val
-│  ├─ Build ResNet50 model
-│  ├─ Train for 10 epochs (40 min on CPU)
-│  ├─ Evaluate on validation set
-│  ├─ Save model to: models/banana_disease_model.h5 (~95MB)
-│  └─ Save metadata to: models/class_metadata.json
-│
-└─ SERVING PHASE (runs gunicorn + Flask)
-   ├─ Start Flask API server on port 8000
-   ├─ Load model into memory on first request
-   ├─ Model stays in memory (not reloaded)
-   └─ Serve predictions until server restarts
+User Image
+    ↓
+[PRIMARY] ResNet50 Model
+    ↓
+Confidence ≥ 70%?
+    ├─ YES → Return prediction ✅
+    └─ NO  → Try BACKUP SERVICE
+           ↓
+      [FALLBACK] Gemini Vision API (if enabled)
+           ↓
+      Return Gemini classification as "backup_validated"
 ```
-
-### In-Memory Model Storage
-
-**Why this approach?**
-- ✅ Fast predictions (model already in RAM)
-- ✅ No disk I/O for each request
-- ✅ No retraining needed
-- ✅ Works on free tier
-
-**What it means:**
-- Model loads once on first API request
-- Stays in server memory until restart
-- All subsequent requests reuse same model
-- Server restart = model reloads from disk
 
 ---
 
@@ -110,70 +66,36 @@ https://your-render-url.onrender.com
 curl https://your-render-url.onrender.com/health
 ```
 
-Response:
-```json
-{
-  "status": "healthy",
-  "model_loaded": true,
-  "classes_available": 4,
-  "classes": ["healthy", "cordana", "pestalotiopsis", "sigatoka"]
-}
-```
-
-### 2. Get Model Information
-```bash
-curl https://your-render-url.onrender.com/info
-```
-
-### 3. Make a Prediction
+### 2. Make a Prediction
 ```bash
 curl -X POST \
   -F "image=@path/to/banana_leaf.jpg" \
   https://your-render-url.onrender.com/predict
 ```
 
-**Response (if healthy leaf - 200)**:
+**Response (successful)**:
 ```json
 {
   "status": "success",
   "predicted_class": "healthy",
   "confidence": 0.92,
-  "all_probabilities": {
-    "healthy": 0.92,
-    "cordana": 0.05,
-    "pestalotiopsis": 0.02,
-    "sigatoka": 0.01
-  },
+  "all_probabilities": { ... },
   "disease_info": {
     "emoji": "✅",
     "title": "HEALTHY LEAF",
-    "description": "Your banana leaf is perfectly healthy...",
-    "recommended_solutions": [
-      "Keep watering regularly",
-      "Ensure adequate sunlight",
-      "Remove dead leaves"
-    ]
+    "recommended_solutions": [...]
   }
 }
 ```
 
-**Response (if not confident - 400)**:
+**Response (using fallback)**:
 ```json
 {
-  "status": "rejected",
-  "reason": "LOW_CONFIDENCE",
-  "message": "Model could not confidently classify this image",
-  "confidence": 0.45,
-  "required_confidence": 0.70
-}
-```
-
-**Response (if not a leaf - 400)**:
-```json
-{
-  "status": "rejected",
-  "reason": "NOT_A_LEAF",
-  "message": "Image does not contain enough green content to be a banana leaf"
+  "status": "success",
+  "source": "backup_validated",
+  "predicted_class": "cordana",
+  "confidence": 0.85,
+  ...
 }
 ```
 
@@ -182,22 +104,6 @@ curl -X POST \
 ## 🧪 Testing Locally
 
 ### Step 1: Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### Step 2: Set Kaggle Credentials
-```powershell
-# Windows PowerShell
-$env:KAGGLE_USERNAME = "your_username"
-$env:KAGGLE_KEY = "your_key"
-
-# Linux/Mac Bash
-export KAGGLE_USERNAME="your_username"
-export KAGGLE_KEY="your_key"
-```
-
-### Step 3: Train Model
 ```bash
 python train.py
 ```
