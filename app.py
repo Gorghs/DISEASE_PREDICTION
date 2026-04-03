@@ -236,8 +236,9 @@ def ensure_model_loaded():
             class InputLayerPatched(TF.keras.layers.InputLayer):
                 @classmethod
                 def from_config(cls, config):
-                    config.pop("batch_shape", None)
                     config.pop("optional", None)
+                    if config.get("batch_shape") is None and config.get("shape") is None:
+                        config["shape"] = (IMG_SIZE, IMG_SIZE, 3)
                     return super().from_config(config)
 
             custom_objects = {
