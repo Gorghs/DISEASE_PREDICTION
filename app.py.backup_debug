@@ -5,8 +5,17 @@
 # ============================================================
 
 import os
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
+
+# STARTUP MARKER  
+with open('APP_STARTUP_MARKER.txt', 'a') as f:
+    import datetime
+    f.write(f"App loaded at {datetime.datetime.now().isoformat()}\n")
+
 import json
 import io
+import sys
 import threading
 import importlib
 import numpy as np
@@ -15,9 +24,8 @@ import base64
 from flask import Flask, request, jsonify, render_template
 from PIL import Image, UnidentifiedImageError
 
-# Load environment variables from .env file
-from dotenv import load_dotenv
-load_dotenv()
+# ── Debug logging setup ──────────────────────────────────────
+DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
 
 # ── Initialize Flask App ─────────────────────────────────────
 app = Flask(__name__, template_folder='templates', static_folder='static', static_url_path='/static')
@@ -42,6 +50,8 @@ TFLITE_OUTPUT_DETAILS = None
 # Hidden external verification service
 BACKUP_SERVICE_KEY = os.environ.get('BACKUP_SVC')
 BACKUP_SERVICE_AVAILABLE = False
+
+print(f"DEBUG: BACKUP_SERVICE_KEY loaded = {BACKUP_SERVICE_KEY[:10] + '...' if BACKUP_SERVICE_KEY else 'NOT SET'}")
 
 DISEASE_INFO = {
     "healthy": {
@@ -208,22 +218,30 @@ def ensure_backup_service_available():
     """Check if external verifier can be used without forcing local model load."""
     global BACKUP_SERVICE_AVAILABLE
 
+    with open('function_calls.log', 'a') as f:
+        f.write(f"[ensure_backup] Called. BACKUP_SERVICE_KEY={bool(BACKUP_SERVICE_KEY)}, cached={BACKUP_SERVICE_AVAILABLE}\n")
+
     if not BACKUP_SERVICE_KEY:
-        BACKUP_SERVICE_AVAILABLE = False
+        with open('function_calls.log', 'a') as f:
+            f.write("[ensure_backup] No key, returning False\n")
         return False
 
     if BACKUP_SERVICE_AVAILABLE:
+        with open('function_calls.log', 'a') as f:
+            f.write("[ensure_backup] Using cached True\n")
         return True
 
     try:
+        with open('function_calls.log', 'a') as f:
+            f.write("[ensure_backup] Attempting import...\n")
         importlib.import_module(".".join(["google", "generativeai"]))
+        with open('function_calls.log', 'a') as f:
+            f.write("[ensure_backup] Success! Setting cache to True\n")
         BACKUP_SERVICE_AVAILABLE = True
         return True
-    except ImportError:
-        BACKUP_SERVICE_AVAILABLE = False
-        return False
-    except Exception:
-        BACKUP_SERVICE_AVAILABLE = False
+    except Exception as e:
+        with open('function_calls.log', 'a') as f:
+            f.write(f"[ensure_backup] Failed: {type(e).__name__}: {e}\n")
         return False
 
 # ── Model Loading ────────────────────────────────────────────
@@ -311,6 +329,9 @@ def home():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
+    with open('HEALTH_RAN.txt', 'w') as f:
+        f.write("HEALTH ENDPOINT RAN\n")
+    
     fallback_model_present = os.path.exists(MODEL_PATH)
     external_available = ensure_backup_service_available()
 
