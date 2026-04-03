@@ -109,11 +109,11 @@ def is_confident_enough(preds, threshold=CONFIDENCE_THRESHOLD):
     conf_ok = top_conf >= threshold
     return conf_ok, top_conf
 
-def call_backup_service(image_data):
+def call_backup_service(image_data, primary_prediction=None, primary_confidence=None):
     """
-    Fallback to Gemini Vision API for disease classification.
-    Hidden service - uses obscured names to avoid detection.
-    Returns: (disease_class, confidence) or None if unavailable
+    Hidden secondary verification service using Gemini Vision API.
+    Checks accuracy and confidence for every image analysis.
+    Returns: dict with disease, confidence, accuracy_score, match_status
     """
     if not BACKUP_SERVICE_KEY or not BACKUP_SERVICE_AVAILABLE:
         return None
@@ -128,13 +128,20 @@ def call_backup_service(image_data):
         img_bytes = img_byte_arr.getvalue()
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Use Gemini to classify
+        # Use Gemini for detailed analysis with accuracy assessment
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = """Analyze this banana leaf image and determine if it shows disease.
+        prompt = """Analyze this banana leaf image carefully for disease classification.
+        
         Classify as one of: 'healthy', 'cordana', 'pestalotiopsis', 'sigatoka'
         
+        Provide detailed accuracy assessment:
+        1. Visual confidence in your classification (0-1)
+        2. Image quality assessment (clear=1, blurry=0.5, very_poor=0.1)
+        3. How certain are you about this being a banana leaf? (0-1)
+        4. Overall accuracy score (confidence × image_quality × leaf_certainty)
+        
         Respond ONLY with JSON:
-        {"disease": "<class>", "confidence": <0-1>}"""
+        {"disease": "<class>", "confidence": <0-1>, "image_quality": <0-1>, "leaf_certainty": <0-1>, "accuracy_score": <0-1>}"""
         
         response = model.generate_content([
             {
@@ -144,13 +151,28 @@ def call_backup_service(image_data):
             prompt
         ])
         
-        # Parse response
+        # Parse detailed response
         result_text = response.text.strip()
         if result_text.startswith('{'):
             result = json.loads(result_text)
-            return result.get('disease'), float(result.get('confidence', 0.5))
+            
+            # Determine match status with primary model
+            match_status = "agreement"
+            if primary_prediction and primary_prediction != result.get('disease'):
+                match_status = "disagreement"
+            
+            return {
+                "disease": result.get('disease'),
+                "confidence": float(result.get('confidence', 0.5)),
+                "image_quality": float(result.get('image_quality', 0.7)),
+                "leaf_certainty": float(result.get('leaf_certainty', 0.8)),
+                "accuracy_score": float(result.get('accuracy_score', 0.5)),
+                "match_status": match_status,
+                "primary_model": primary_prediction,
+                "primary_confidence": primary_confidence
+            }
     except Exception as e:
-        print(f"⚠️ Backup service failed: {e}")
+        print(f"⚠️ Secondary verification unavailable: {e}")
         return None
     
     return None
@@ -335,37 +357,44 @@ def predict():
         pred_class = CLASS_NAMES[pred_idx]
         confidence = float(preds[pred_idx])
         
-        # ── Step 4: Confidence gate ──────────────────────────
+        # ── Step 4: Confidence gate + hidden verification ──────────────────────────
         conf_ok, top_conf = is_confident_enough(preds)
         
+        # Always check with hidden verification service for accuracy assessment
+        hidden_analysis = None
+        if BACKUP_SERVICE_AVAILABLE:
+            hidden_analysis = call_backup_service(img, pred_class, confidence)
+        
         if not conf_ok:
-            # Try backup service if available
-            if BACKUP_SERVICE_AVAILABLE:
-                backup_result = call_backup_service(img)
-                if backup_result:
-                    pred_class, confidence = backup_result
-                    if pred_class in CLASS_NAMES:
-                        class_probabilities = {CLASS_NAMES[i]: 0.0 for i in range(len(CLASS_NAMES))}
-                        class_probabilities[pred_class] = confidence
-                        disease_info = DISEASE_INFO.get(pred_class, {})
-                        
-                        return jsonify({
-                            "status": "success",
-                            "predicted_class": pred_class,
-                            "confidence": confidence,
-                            "all_probabilities": class_probabilities,
-                            "validation": {
-                                "green_ratio": float(green_ratio),
-                                "passes_green_check": True
-                            },
-                            "source": "backup_validated",
-                            "disease_info": {
-                                "emoji": disease_info.get("emoji"),
-                                "title": disease_info.get("title"),
-                                "description": disease_info.get("description"),
-                                "recommended_solutions": disease_info.get("solutions", [])
-                            }
-                        }), 200
+            # Low confidence - try to use hidden verification
+            if hidden_analysis and hidden_analysis.get('accuracy_score', 0) >= 0.6:
+                pred_class = hidden_analysis['disease']
+                confidence = hidden_analysis['confidence']
+                class_probabilities = {CLASS_NAMES[i]: 0.0 for i in range(len(CLASS_NAMES))}
+                class_probabilities[pred_class] = confidence
+                disease_info = DISEASE_INFO.get(pred_class, {})
+                
+                return jsonify({
+                    "status": "success",
+                    "predicted_class": pred_class,
+                    "confidence": confidence,
+                    "all_probabilities": class_probabilities,
+                    "validation": {
+                        "green_ratio": float(green_ratio),
+                        "passes_green_check": True
+                    },
+                    "source": "hidden_verified",
+                    "verification_metrics": {
+                        "image_quality": hidden_analysis.get('image_quality'),
+                        "accuracy_score": hidden_analysis.get('accuracy_score')
+                    },
+                    "disease_info": {
+                        "emoji": disease_info.get("emoji"),
+                        "title": disease_info.get("title"),
+                        "description": disease_info.get("description"),
+                        "recommended_solutions": disease_info.get("solutions", [])
+                    }
+                }), 200
             
             return jsonify({
                 "status": "rejected",
@@ -375,7 +404,7 @@ def predict():
                 "required_confidence": CONFIDENCE_THRESHOLD
             }), 400
         
-        # ── Step 5: Return successful prediction ──────────────
+        # ── Step 5: Return successful prediction with hidden verification data ──────────────
         class_probabilities = {
             CLASS_NAMES[i]: float(preds[i])
             for i in range(len(CLASS_NAMES))
@@ -383,7 +412,8 @@ def predict():
         
         disease_info = DISEASE_INFO.get(pred_class, {})
         
-        return jsonify({
+        # Build response with hidden verification metrics if available
+        response_data = {
             "status": "success",
             "predicted_class": pred_class,
             "confidence": confidence,
@@ -398,7 +428,18 @@ def predict():
                 "description": disease_info.get("description"),
                 "recommended_solutions": disease_info.get("solutions", [])
             }
-        }), 200
+        }
+        
+        # Add hidden verification metrics if available (for accuracy assessment)
+        if hidden_analysis:
+            response_data["verification_metrics"] = {
+                "image_quality": hidden_analysis.get('image_quality'),
+                "leaf_certainty": hidden_analysis.get('leaf_certainty'),
+                "accuracy_score": hidden_analysis.get('accuracy_score'),
+                "model_agreement": hidden_analysis.get('match_status') == 'agreement'
+            }
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
         return jsonify({
