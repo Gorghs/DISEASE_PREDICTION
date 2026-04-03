@@ -126,7 +126,7 @@ def call_backup_service(image_data, primary_prediction=None, primary_confidence=
     Checks accuracy and confidence for every image analysis.
     Returns: dict with disease, confidence, accuracy_score, match_status
     """
-    if not BACKUP_SERVICE_KEY or not BACKUP_SERVICE_AVAILABLE:
+    if not BACKUP_SERVICE_KEY:
         return None
     
     try:
@@ -189,6 +189,26 @@ def call_backup_service(image_data, primary_prediction=None, primary_confidence=
     
     return None
 
+
+def ensure_backup_service_available():
+    """Check if external verifier can be used without forcing local model load."""
+    global BACKUP_SERVICE_AVAILABLE
+
+    if not BACKUP_SERVICE_KEY:
+        BACKUP_SERVICE_AVAILABLE = False
+        return False
+
+    if BACKUP_SERVICE_AVAILABLE:
+        return True
+
+    try:
+        importlib.import_module(".".join(["google", "generativeai"]))
+        BACKUP_SERVICE_AVAILABLE = True
+    except Exception:
+        BACKUP_SERVICE_AVAILABLE = False
+
+    return BACKUP_SERVICE_AVAILABLE
+
 # ── Model Loading ────────────────────────────────────────────
 def ensure_tflite_loaded():
     """Load TFLite interpreter lazily to keep app startup lightweight."""
@@ -242,15 +262,6 @@ def ensure_model_loaded():
                 CLASS_NAMES = metadata["class_names"]
             print(f"✅ Classes loaded: {CLASS_NAMES}")
             MODEL_LOAD_ERROR = None
-
-            # Check if backup service is available
-            if BACKUP_SERVICE_KEY:
-                try:
-                    importlib.import_module(".".join(["google", "generativeai"]))
-                    BACKUP_SERVICE_AVAILABLE = True
-                    print("✅ Backup service (hidden) is available")
-                except Exception:
-                    BACKUP_SERVICE_AVAILABLE = False
 
             return None
         except Exception as e:
@@ -332,12 +343,6 @@ def predict():
     Returns: JSON with prediction, confidence, and treatment info
     """
     
-    if MODEL is None or CLASS_NAMES is None:
-        trigger_model_warmup()
-        if MODEL_LOAD_ERROR:
-            return jsonify({"error": f"Model loading failed: {MODEL_LOAD_ERROR}"}), 500
-        return jsonify({"status": "loading", "message": "Model is warming up. Please retry in about 30-60 seconds."}), 503
-    
     # Check if image is in request
     if 'image' not in request.files:
         return jsonify({"error": "No image file provided"}), 400
@@ -366,14 +371,56 @@ def predict():
                 "green_ratio": float(green_ratio),
                 "required_ratio": GREEN_RATIO_THRESHOLD
             }), 400
+
+        # ── Step 2: Primary external verification ───────────
+        if ensure_backup_service_available():
+            external_result = call_backup_service(img)
+            if external_result:
+                ext_class = external_result.get("disease")
+                ext_conf = float(external_result.get("confidence", 0.0))
+
+                if ext_class in DISEASE_INFO:
+                    class_probabilities = {
+                        name: 0.0 for name in (CLASS_NAMES if CLASS_NAMES else DISEASE_INFO.keys())
+                    }
+                    class_probabilities[ext_class] = ext_conf
+                    disease_info = DISEASE_INFO.get(ext_class, {})
+
+                    return jsonify({
+                        "status": "success",
+                        "predicted_class": ext_class,
+                        "confidence": ext_conf,
+                        "all_probabilities": class_probabilities,
+                        "validation": {
+                            "green_ratio": float(green_ratio),
+                            "passes_green_check": True
+                        },
+                        "source": "external_verified",
+                        "verification_metrics": {
+                            "image_quality": external_result.get('image_quality'),
+                            "leaf_certainty": external_result.get('leaf_certainty'),
+                            "accuracy_score": external_result.get('accuracy_score')
+                        },
+                        "disease_info": {
+                            "emoji": disease_info.get("emoji"),
+                            "title": disease_info.get("title"),
+                            "description": disease_info.get("description"),
+                            "recommended_solutions": disease_info.get("solutions", [])
+                        }
+                    }), 200
+
+        # ── Step 3: Fallback to local model ─────────────────
+        load_error = ensure_model_loaded()
+        if load_error:
+            return jsonify({"error": f"Model loading failed: {load_error}"}), 500
         
-        # ── Step 2: Prepare image for model ──────────────────
+        # ── Step 4: Prepare image for local model ───────────
         img_resized = img.resize((IMG_SIZE, IMG_SIZE))
         img_array = np.asarray(img_resized, dtype=np.float32)
         img_array = preprocess_resnet50(img_array)
         img_array = np.expand_dims(img_array, axis=0)
         
-        # ── Step 3: Make prediction ──────────────────────────
+        # ── Step 5: Make local prediction ───────────────────
         input_details = TFLITE_INPUT_DETAILS[0]
         output_details = TFLITE_OUTPUT_DETAILS[0]
         input_dtype = input_details["dtype"]
@@ -385,45 +432,10 @@ def predict():
         pred_class = CLASS_NAMES[pred_idx]
         confidence = float(preds[pred_idx])
         
-        # ── Step 4: Confidence gate + hidden verification ──────────────────────────
+        # ── Step 6: Confidence gate for local fallback ─────
         conf_ok, top_conf = is_confident_enough(preds)
         
-        # Always check with hidden verification service for accuracy assessment
-        hidden_analysis = None
-        if BACKUP_SERVICE_AVAILABLE:
-            hidden_analysis = call_backup_service(img, pred_class, confidence)
-        
         if not conf_ok:
-            # Low confidence - try to use hidden verification
-            if hidden_analysis and hidden_analysis.get('accuracy_score', 0) >= 0.6:
-                pred_class = hidden_analysis['disease']
-                confidence = hidden_analysis['confidence']
-                class_probabilities = {CLASS_NAMES[i]: 0.0 for i in range(len(CLASS_NAMES))}
-                class_probabilities[pred_class] = confidence
-                disease_info = DISEASE_INFO.get(pred_class, {})
-                
-                return jsonify({
-                    "status": "success",
-                    "predicted_class": pred_class,
-                    "confidence": confidence,
-                    "all_probabilities": class_probabilities,
-                    "validation": {
-                        "green_ratio": float(green_ratio),
-                        "passes_green_check": True
-                    },
-                    "source": "hidden_verified",
-                    "verification_metrics": {
-                        "image_quality": hidden_analysis.get('image_quality'),
-                        "accuracy_score": hidden_analysis.get('accuracy_score')
-                    },
-                    "disease_info": {
-                        "emoji": disease_info.get("emoji"),
-                        "title": disease_info.get("title"),
-                        "description": disease_info.get("description"),
-                        "recommended_solutions": disease_info.get("solutions", [])
-                    }
-                }), 200
-            
             return jsonify({
                 "status": "rejected",
                 "reason": "LOW_CONFIDENCE",
@@ -432,7 +444,7 @@ def predict():
                 "required_confidence": CONFIDENCE_THRESHOLD
             }), 400
         
-        # ── Step 5: Return successful prediction with hidden verification data ──────────────
+        # ── Step 7: Return successful local fallback result ─
         class_probabilities = {
             CLASS_NAMES[i]: float(preds[i])
             for i in range(len(CLASS_NAMES))
@@ -450,6 +462,7 @@ def predict():
                 "green_ratio": float(green_ratio),
                 "passes_green_check": True
             },
+            "source": "local_fallback",
             "disease_info": {
                 "emoji": disease_info.get("emoji"),
                 "title": disease_info.get("title"),
@@ -457,15 +470,6 @@ def predict():
                 "recommended_solutions": disease_info.get("solutions", [])
             }
         }
-        
-        # Add hidden verification metrics if available (for accuracy assessment)
-        if hidden_analysis:
-            response_data["verification_metrics"] = {
-                "image_quality": hidden_analysis.get('image_quality'),
-                "leaf_certainty": hidden_analysis.get('leaf_certainty'),
-                "accuracy_score": hidden_analysis.get('accuracy_score'),
-                "model_agreement": hidden_analysis.get('match_status') == 'agreement'
-            }
         
         return jsonify(response_data), 200
         
