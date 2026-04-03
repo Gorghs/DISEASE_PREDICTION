@@ -215,12 +215,10 @@ def ensure_backup_service_available():
         importlib.import_module(".".join(["google", "generativeai"]))
         BACKUP_SERVICE_AVAILABLE = True
         return True
-    except ImportError as e:
-        print(f"⚠️ google.generativeai import failed: {e}")
+    except ImportError:
         BACKUP_SERVICE_AVAILABLE = False
         return False
-    except Exception as e:
-        print(f"⚠️ Unexpected error checking backup service: {e}")
+    except Exception:
         BACKUP_SERVICE_AVAILABLE = False
         return False
 
