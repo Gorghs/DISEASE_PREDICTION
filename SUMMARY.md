@@ -7,7 +7,7 @@ This project serves a pre-trained banana leaf disease classifier via a Flask API
 - Pre-trained model in models/banana_model.h5
 - Metadata in models/metadata.json
 - Render deployment with gunicorn
-- Optional Gemini fallback via BACKUP_SVC
+- Optional external fallback via BACKUP_SVC
 
 ## Deploy (Render)
 

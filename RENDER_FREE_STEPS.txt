@@ -19,7 +19,7 @@ STEP 1: CREATE RENDER WEB SERVICE
 
 STEP 2: ADD ENV VARS (OPTIONAL)
 -------------------------------
-- BACKUP_SVC = Gemini API key (optional for hidden fallback verification)
+- BACKUP_SVC = external verifier API key (optional for hidden fallback verification)
 
 STEP 3: DEPLOY
 --------------
