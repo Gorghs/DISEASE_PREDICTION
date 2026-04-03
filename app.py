@@ -30,6 +30,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "banana_model.h5")
 METADATA_PATH = os.path.join(BASE_DIR, "models", "metadata.json")
 TF = None
+KERAS_LOAD_MODEL = None
 IMG_TO_ARRAY = None
 PREPROCESS_INPUT = None
 
@@ -180,17 +181,20 @@ def call_backup_service(image_data, primary_prediction=None, primary_confidence=
 # ── Model Loading ────────────────────────────────────────────
 def ensure_tf_loaded():
     """Import TensorFlow lazily to keep app startup lightweight."""
-    global TF, IMG_TO_ARRAY, PREPROCESS_INPUT
+    global TF, KERAS_LOAD_MODEL, IMG_TO_ARRAY, PREPROCESS_INPUT
 
     if TF is not None:
         return None
 
     try:
         import tensorflow as tf
+        import keras
+        from keras.saving import load_model as keras_load_model
         from tensorflow.keras.preprocessing.image import img_to_array
         from tensorflow.keras.applications.resnet import preprocess_input
 
         TF = tf
+        KERAS_LOAD_MODEL = keras_load_model
         IMG_TO_ARRAY = img_to_array
         PREPROCESS_INPUT = preprocess_input
         return None
@@ -216,7 +220,12 @@ def ensure_model_loaded():
                 MODEL_LOAD_ERROR = tf_error
                 return MODEL_LOAD_ERROR
 
-            MODEL = TF.keras.models.load_model(MODEL_PATH, compile=False)
+            try:
+                MODEL = KERAS_LOAD_MODEL(MODEL_PATH, compile=False)
+            except Exception as load_error:
+                # Fallback for environments without Keras 3 support
+                print(f"⚠️ Keras load failed, falling back to tf.keras: {load_error}")
+                MODEL = TF.keras.models.load_model(MODEL_PATH, compile=False)
             print("✅ Model loaded successfully into memory")
 
             with open(METADATA_PATH, 'r') as f:

@@ -14,7 +14,6 @@ venv/
 env/
 .venv/
 kaggle.json
-training_log.txt
 .vscode/
 .idea/
 *.swp

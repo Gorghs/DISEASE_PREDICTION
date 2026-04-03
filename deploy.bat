@@ -68,8 +68,6 @@ echo 7. Add Environment Variables:
 echo    - BACKUP_SVC = Gemini API key (optional, for fallback classification)
 echo 8. Click Deploy
 echo.
-echo ⏱️  Training will take ~1 hour on first deploy
-echo.
 echo 🎉 Your app will be available at:
 echo    https://your-app-name.onrender.com
 echo.
