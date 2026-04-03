@@ -165,6 +165,16 @@ def call_backup_service(image_data, primary_prediction=None, primary_confidence=
         
         # Parse detailed response
         result_text = response.text.strip()
+        
+        # Strip markdown JSON wrappers if present (API returns ```json ... ```)
+        if result_text.startswith('```json'):
+            result_text = result_text[7:]  # Remove ```json
+        if result_text.startswith('```'):
+            result_text = result_text[3:]  # Remove ```
+        if result_text.endswith('```'):
+            result_text = result_text[:-3]  # Remove trailing ```
+        result_text = result_text.strip()
+        
         if result_text.startswith('{'):
             result = json.loads(result_text)
             
