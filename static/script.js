@@ -21,7 +21,11 @@ const closeCameraBtn = document.getElementById('closeCameraBtn');
 let cameraStream = null;
 
 // File Handling
-uploadFileBtn.addEventListener('click', () => imageInput.click());
+uploadFileBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    imageInput.click();
+});
 
 imageInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
