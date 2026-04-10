@@ -1,6 +1,7 @@
 // DOM Elements
 const uploadArea = document.getElementById('uploadArea');
 const imageInput = document.getElementById('imageInput');
+const cameraInput = document.getElementById('cameraInput');
 const previewContainer = document.getElementById('previewContainer');
 const previewImage = document.getElementById('previewImage');
 const changeImageBtn = document.getElementById('changeImageBtn');
@@ -30,6 +31,14 @@ uploadFileBtn.addEventListener('click', (e) => {
 imageInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         handleImageSelect(e.target.files[0]);
+        imageInput.value = '';
+    }
+});
+
+cameraInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleImageSelect(e.target.files[0]);
+        cameraInput.value = '';
     }
 });
 
@@ -114,8 +123,9 @@ function capturePhotoFromCamera() {
 }
 
 openCameraBtn.addEventListener('click', (e) => {
+    e.preventDefault();
     e.stopPropagation();
-    startCamera();
+    cameraInput.click();
 });
 
 capturePhotoBtn.addEventListener('click', capturePhotoFromCamera);
@@ -262,6 +272,7 @@ tryAgainBtn.addEventListener('click', () => {
     resultsSection.classList.add('hidden');
     loadingSpinner.classList.add('hidden');
     imageInput.value = '';
+    cameraInput.value = '';
 });
 
 // Initialize
